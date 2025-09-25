@@ -144,15 +144,11 @@ def verify(filename):
     
     # print out the digest
     der = open(filename + ".hmac", 'rb').read()
-    try:
-        decoded, _ = decoder.decode(der)
-        alg_seq = decoded[0]
-        oid_obj = alg_seq[0]
-        oid_str = '.'.join(str(x) for x in oid_obj)
-        digest = decoded[1].asOctets()
-    except Exception as e:
-        print("[-] Failed to parse ASN.1: {}".format(e))
-        return
+    decoded, _ = decoder.decode(der)
+    alg_seq = decoded[0]
+    oid_obj = alg_seq[0]
+    oid_str = '.'.join(str(x) for x in oid_obj)
+    digest = decoded[1].asOctets()
     print("[+] HMAC in file: {}".format(digest.hex()))
     
     # ask for the key
