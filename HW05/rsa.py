@@ -3,7 +3,7 @@
 import codecs, hashlib, os, sys # do not use any other imports/libraries
 from pyasn1.codec.der import decoder
 
-# 11.40 (please specify here how much time your solution required)
+# 2h (please specify here how much time your solution required)
 
 def ib(i, length=False):
     # converts integer to bytes
@@ -113,48 +113,60 @@ def asn1_tag_explicit(der, tag):
 
 def pem_to_der(content):
     # converts PEM content to DER
-    return content
+    return codecs.decode((b''.join((content.strip().splitlines())[1:-1])), 'base64')
 
 def get_pubkey(filename):
     # reads public key file encoded using SubjectPublicKeyInfo structure and returns (N, e)
-
+    with open(filename, 'rb') as f:
+        pem = f.read()
+    der = decoder.decode(pem_to_der(pem))
     # DER-decode the DER to get RSAPublicKey DER structure, which is encoded as BITSTRING
-
+    RSAPublicKey = der[0][1]
     # convert BITSTRING to bytestring
-
+    RSAPublicKey = RSAPublicKey.asOctets()
     # DER-decode the bytestring (which is actually DER) and return (N, e)
-
+    pubkey = decoder.decode(RSAPublicKey)[0]
     return int(pubkey[0]), int(pubkey[1])
 
 def get_privkey(filename):
     # reads private key file encoded using PrivateKeyInfo (PKCS#8) structure and returns (N, d)
-
+    with open(filename, 'rb') as f:
+        pem = f.read()
+    der = decoder.decode(pem_to_der(pem))
     # DER-decode the DER to get RSAPrivateKey DER structure, which is encoded as OCTETSTRING
-
+    RSAPrivateKey = der[0][2].asOctets()
     # DER-decode the octetstring (which is actually DER) and return (N, d)
-
+    privkey = decoder.decode(RSAPrivateKey)
     return int(privkey[0][1]), int(privkey[0][3])
-
+    
 
 def pkcsv15pad_encrypt(plaintext, n):
     # pad plaintext for encryption according to PKCS#1 v1.5
 
     # calculate number of bytes required to represent the modulus N
-
+    k = (n.bit_length() + 7) // 8
+    
     # plaintext must be at least 11 bytes smaller than the modulus
-
+    if len(plaintext) > k - 11:
+        raise ValueError("Plaintext too long")
+    
     # generate padding bytes
+    PS = b''
+    while len(PS) < k - len(plaintext) - 3:
+        b = os.urandom(1)
+        if b != b'\x00':
+            PS += b
+
+    padded_plaintext = b'\x00\x02' + PS + b'\x00' + plaintext
     return padded_plaintext
 
 def pkcsv15pad_sign(plaintext, n):
     # pad plaintext for signing according to PKCS#1 v1.5
-
     # calculate bytelength of modulus N
-
     # plaintext must be at least 11 bytes smaller than the modulus N
-
     # generate padding bytes
-    return padded_plaintext
+    # return padded_plaintext
+    pass
 
 def pkcsv15pad_remove(plaintext):
     # removes PKCS#1 v1.5 padding
@@ -162,14 +174,52 @@ def pkcsv15pad_remove(plaintext):
     return plaintext
 
 def encrypt(keyfile, plaintextfile, ciphertextfile):
-    pass
+    N,e = get_pubkey(keyfile)
+    
+    # Pad plain text
+    with open(plaintextfile, 'rb') as f:
+        plaintext = pkcsv15pad_encrypt(f.read(), N)    
+    
+    # Convert padded byte string to integer
+    m = bi(plaintext)
+    
+    # Calculate ciphertext: c = m^e mod N
+    c = pow(m,e,N)
+    
+    # Convert ciphertext integer to byte string
+    k = (N.bit_length()+7)//8
+    ciphertext = ib(c,k)
+      
+    # Write ciphertext to file
+    with open(ciphertextfile, 'wb') as f:
+        f.write(ciphertext)        
 
 def decrypt(keyfile, ciphertextfile, plaintextfile):
-    pass
+    
+    N,e = get_privkey(keyfile)
+    with open(ciphertextfile, 'rb') as f:
+        ciphertext = f.read()  
+        
+    # Convert ciphertext to integer
+    c = bi(ciphertext)
+    
+    # Calculate decryption: m = c^d mod N
+    m = pow(c,e,N)
+    
+    # Convert decrypted integer to byte string
+    plaintext = ib(m,(N.bit_length()+7)//8)
+
+    # Remove padding
+    plaintext = pkcsv15pad_remove(plaintext)
+
+    # Write plaintext to file
+    with open(plaintextfile, 'wb') as f:
+        f.write(plaintext)
 
 def digestinfo_der(filename):
     # returns ASN.1 DER encoded DigestInfo structure containing SHA256 digest of file
-    return der
+    # return der
+    pass
 
 def sign(keyfile, filetosign, signaturefile):
     pass
