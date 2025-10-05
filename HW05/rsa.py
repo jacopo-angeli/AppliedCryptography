@@ -3,7 +3,7 @@
 import codecs, hashlib, os, sys # do not use any other imports/libraries
 from pyasn1.codec.der import decoder
 
-# 2h (please specify here how much time your solution required)
+# 4.5h (please specify here how much time your solution required)
 
 def ib(i, length=False):
     # converts integer to bytes
@@ -113,7 +113,14 @@ def asn1_tag_explicit(der, tag):
 
 def pem_to_der(content):
     # converts PEM content to DER
-    return codecs.decode((b''.join((content.strip().splitlines())[1:-1])), 'base64')
+    content = content.strip()
+    if content.startswith(b'-----BEGIN'):
+        # extract base64 body between BEGIN/END and decode
+        b64 = b''.join(content.splitlines()[1:-1])
+        return codecs.decode(b64, 'base64')
+    else:
+        # assume already DER
+        return content
 
 def get_pubkey(filename):
     # reads public key file encoded using SubjectPublicKeyInfo structure and returns (N, e)
@@ -162,16 +169,23 @@ def pkcsv15pad_encrypt(plaintext, n):
 
 def pkcsv15pad_sign(plaintext, n):
     # pad plaintext for signing according to PKCS#1 v1.5
+    
     # calculate bytelength of modulus N
+    k = (n.bit_length() + 7) // 8
+    
     # plaintext must be at least 11 bytes smaller than the modulus N
+    if len(plaintext) > k - 11:
+        raise ValueError("Plaintext too long")
+    
     # generate padding bytes
+    PS = b'\xff' * (k - len(plaintext) - 3)
+            
     # return padded_plaintext
-    pass
+    return b'\x00\x01' + PS + b'\x00' + plaintext
 
 def pkcsv15pad_remove(plaintext):
     # removes PKCS#1 v1.5 padding
-
-    return plaintext
+    return plaintext[(plaintext.find(b'\x00', 2))+1:]
 
 def encrypt(keyfile, plaintextfile, ciphertextfile):
     N,e = get_pubkey(keyfile)
@@ -197,15 +211,18 @@ def encrypt(keyfile, plaintextfile, ciphertextfile):
 def decrypt(keyfile, ciphertextfile, plaintextfile):
     
     N,e = get_privkey(keyfile)
-    with open(ciphertextfile, 'rb') as f:
-        ciphertext = f.read()  
-        
+    
     # Convert ciphertext to integer
-    c = bi(ciphertext)
+    with open(ciphertextfile, 'rb') as f:
+        ciphertext = bi(f.read())  
     
     # Calculate decryption: m = c^d mod N
-    m = pow(c,e,N)
-    
+    m = 1
+    for bit in bin(e)[2:]:
+        m = (m * m) % N
+        if bit == '1':
+            m = (m * ciphertext) % N
+       
     # Convert decrypted integer to byte string
     plaintext = ib(m,(N.bit_length()+7)//8)
 
@@ -218,18 +235,65 @@ def decrypt(keyfile, ciphertextfile, plaintextfile):
 
 def digestinfo_der(filename):
     # returns ASN.1 DER encoded DigestInfo structure containing SHA256 digest of file
-    # return der
-    pass
+    with open(filename, 'rb') as f:
+        digest = hashlib.sha256(f.read()).digest()
+    der = asn1_sequence(
+        asn1_sequence(
+            asn1_objectidentifier([2,16,840,1,101,3,4,2,1]) + # OID for SHA-256
+            asn1_null()
+        ) + 
+        asn1_octetstring(digest)
+    )
+    return der
 
 def sign(keyfile, filetosign, signaturefile):
-    pass
+    N,d = get_privkey(keyfile)
+    
+    # Construct plaintext (DER DigestInfo of the file to sign)
+    plaintext = digestinfo_der(filetosign)
+    
+    
+    # Pad plaintext
+    plaintext = pkcsv15pad_sign(plaintext, N)
+    
+    # Convert padded byte string to integer
+    m = bi(plaintext)
+    
+    # Calculate signature: s = m^d mod N
+    s = pow(m,d,N)
 
-    # Warning: make sure that signaturefile produced has the same
-    # length as the modulus (hint: use parametrized ib()).
+    # Convert signature integer to byte string
+    k = (N.bit_length()+7)//8
+    signature = ib(s,k)
+
+    # Write signature to file
+    with open(signaturefile, 'wb') as f:
+        f.write(signature)
 
 def verify(keyfile, signaturefile, filetoverify):
-    # prints "Verified OK" or "Verification failure"
-    pass
+    N,e = get_pubkey(keyfile)
+    
+    # Convert signature byte string to integer
+    with open(signaturefile, 'rb') as f:
+        signature = f.read()
+    s = bi(signature)
+    
+    # Calculate decryption: m = s^e mod N
+    m = pow(s,e,N)
+
+    # Convert decrypted integer to byte string
+    k = (N.bit_length()+7)//8
+    plaintext = ib(m,k)
+    
+    # Remove padding to obtain DER DigestInfo structure
+    plaintext = pkcsv15pad_remove(plaintext)
+
+    # Compare DigestInfo with DigestInfo of the signed file
+    expected = digestinfo_der(filetoverify)
+    if plaintext == expected:
+        print("Verified OK")
+    else:
+        print("Verification failure")
 
 def usage():
     print("Usage:")

@@ -6,12 +6,12 @@ openssl rsa -in priv.pem -pubout -out pub.pem
 
 echo "[+] Testing encryption ($KEYSIZE-bit RSA)..."
 echo "hello" > plain.txt
-./rsa.py encrypt pub.pem plain.txt plain.enc
+../rsa.py encrypt pub.pem plain.txt plain.enc
 #ls -alh plain.enc
 openssl pkeyutl -decrypt -inkey priv.pem -in plain.enc -out plain.dec
 diff -u plain.txt plain.dec
-#hexdump -C plain.txt
-#hexdump -C plain.dec
+# hexdump -C plain.txt
+# hexdump -C plain.dec
 
 # To see why openssl failed to decrypt the ciphertext do raw decryption with private key
 # (the result should be correctly padded plaintext):
@@ -21,18 +21,20 @@ diff -u plain.txt plain.dec
 echo "[+] Testing decryption (PEM)..."
 openssl pkeyutl -encrypt -pubin -inkey pub.pem -in plain.txt -out plain.enc
 rm -f plain.dec
-./rsa.py decrypt priv.pem plain.enc plain.dec
+../rsa.py decrypt priv.pem plain.enc plain.dec
 diff -u plain.txt plain.dec
+# hexdump -C plain.txt
+# hexdump -C plain.dec
 
 echo "[+] Testing decryption (DER)..."
 openssl pkcs8 -nocrypt -inform pem -in priv.pem -topk8 -outform der -out priv.key
 rm -f plain.dec
-./rsa.py decrypt priv.key plain.enc plain.dec
+../rsa.py decrypt priv.key plain.enc plain.dec
 diff -u plain.txt plain.dec
 
 echo "[+] Testing signing..."
 dd if=/dev/urandom of=filetosign bs=1M count=1 > /dev/null 2>&1
-./rsa.py sign priv.pem filetosign signature
+../rsa.py sign priv.pem filetosign signature
 openssl dgst -sha256 -verify pub.pem -signature signature filetosign
 
 # To see why openssl failed to verify the signature do raw decryption with public key
@@ -42,8 +44,8 @@ openssl dgst -sha256 -verify pub.pem -signature signature filetosign
 
 echo "[+] Testing successful verification..."
 openssl dgst -sha256 -sign priv.pem -out signature filetosign
-./rsa.py verify pub.pem signature filetosign
+../rsa.py verify pub.pem signature filetosign
 
 echo "[+] Testing failed verification..."
 openssl dgst -md5 -sign priv.pem -out signature filetosign
-./rsa.py verify pub.pem signature filetosign
+../rsa.py verify pub.pem signature filetosign
