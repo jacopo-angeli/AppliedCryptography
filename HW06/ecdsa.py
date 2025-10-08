@@ -4,6 +4,8 @@ import codecs, hashlib, os, sys # do not use any other imports/libraries
 from secp256r1 import curve
 from pyasn1.codec.der import decoder
 
+# 1h
+
 def ib(i, length=False):
     # converts integer to bytes
     b = b''
@@ -123,12 +125,20 @@ def pem_to_der(content):
 
 def get_privkey(filename):
     # reads EC private key file and returns the private key integer (d)
-
+    with open(filename, 'rb') as f:
+        der = decoder.decode(pem_to_der(f.read()))
+    ECPrivateKey = decoder.decode(der[2].asOctets())
+    d = bi(ECPrivateKey[1].asOctets())
     return d
 
 def get_pubkey(filename):
     # reads EC public key file and returns coordinates (x, y) of the public key point
-
+    with open(filename, 'rb') as f:
+        der = decoder.decode(pem_to_der(f.read()))
+    ECPoint = der[1].asOctets()
+    coord_len = (len(ECPoint) - 1) // 2
+    x = bi(ECPoint[1:1+coord_len])
+    y = bi(ECPoint[1+coord_len:1+2*coord_len])
     return (x,y)
 
 def ecdsa_sign(keyfile, filetosign, signaturefile):
