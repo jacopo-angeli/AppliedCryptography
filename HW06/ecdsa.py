@@ -4,7 +4,7 @@ import codecs, hashlib, os, sys # do not use any other imports/libraries
 from secp256r1 import curve
 from pyasn1.codec.der import decoder
 
-# 1h
+# 7h
 
 def ib(i, length=False):
     # converts integer to bytes
@@ -126,19 +126,37 @@ def pem_to_der(content):
 def get_privkey(filename):
     # reads EC private key file and returns the private key integer (d)
     with open(filename, 'rb') as f:
-        der = decoder.decode(pem_to_der(f.read()))
-    ECPrivateKey = decoder.decode(der[2].asOctets())
-    d = bi(ECPrivateKey[1].asOctets())
+        der = decoder.decode(pem_to_der(f.read()))    
+    ECPrivateKey = decoder.decode(der[0][2].asOctets())
+    d = bi(ECPrivateKey[0][1])
     return d
 
 def get_pubkey(filename):
     # reads EC public key file and returns coordinates (x, y) of the public key point
     with open(filename, 'rb') as f:
         der = decoder.decode(pem_to_der(f.read()))
-    ECPoint = der[1].asOctets()
-    coord_len = (len(ECPoint) - 1) // 2
-    x = bi(ECPoint[1:1+coord_len])
-    y = bi(ECPoint[1+coord_len:1+2*coord_len])
+    ECPoint = der[0][1]
+    ECPoint_bytes = ECPoint.asOctets()
+    if ECPoint_bytes[0] == 0x04:
+        # uncompressed form
+        field_size = (curve.p.bit_length() + 7) // 8
+        x = bi(ECPoint_bytes[1:1+field_size])
+        y = bi(ECPoint_bytes[1+field_size:1+2*field_size])
+    elif ECPoint_bytes[0] in (0x02, 0x03):
+        # compressed form
+        field_size = (curve.p.bit_length() + 7) // 8
+        x = bi(ECPoint_bytes[1:1+field_size])
+        # decompress y
+        alpha = (x * x * x + curve.a * x + curve.b) % curve.p
+        beta = pow(alpha, (curve.p + 1) // 4, curve.p)
+        if (beta % 2) == (ECPoint_bytes[0] & 1):
+            y = beta
+        else:
+            y = curve.p - beta
+    elif ECPoint_bytes[0] == 0x00:
+        # point at infinity
+        x = 0
+        y = 0
     return (x,y)
 
 def ecdsa_sign(keyfile, filetosign, signaturefile):
@@ -147,26 +165,81 @@ def ecdsa_sign(keyfile, filetosign, signaturefile):
     d = get_privkey(keyfile)
 
     # calculate SHA-384 hash of the file to be signed
-
+    with open(filetosign, 'rb') as f:
+        data = f.read()
+    h = hashlib.sha384(data).digest()
+    
     # truncate the hash value to the curve size
-
+    n = curve.n
+    nbytes = (n.bit_length() + 7) // 8
+    h_trunc = h[:nbytes]
+    
     # convert hash to integer
-
+    z = bi(h_trunc)
+    
     # generate a random nonce k in the range [1, n-1]
-
-    # calculate ECDSA signature components r and s
+    while True:
+        k = bi(os.urandom(nbytes)) % (n - 1) + 1
+        # calculate ECDSA signature components r and s
+        R = curve.mul(curve.g, k)
+        r = R[0] % n
+        if r == 0:
+            continue
+        k_inv = pow(k, -1, n)
+        s = (k_inv * (z + r * d)) % n
+        if s == 0:
+            continue
+        break
 
     # DER-encode r and s
+    der_seq = asn1_sequence(asn1_integer(r) + asn1_integer(s))
 
     # write DER structure to file
+    with open(signaturefile, 'wb') as f:
+        f.write(der_seq)
 
 def ecdsa_verify(keyfile, signaturefile, filetoverify):
-    # prints "Verified OK" or "Verification failure"
+    Qx, Qy = get_pubkey(keyfile)
+    Q = (Qx, Qy)
+    
+    with open(signaturefile, 'rb') as f:
+        sig = f.read()
+    seq, _ = decoder.decode(sig)
+    r = int(seq.getComponentByPosition(0))
+    s = int(seq.getComponentByPosition(1))
 
-    if R[0] == r:
+    n = curve.n
+    if not (1 <= r < n and 1 <= s < n):
+        print("Verification failure")
+        return
+
+    with open(filetoverify, 'rb') as f:
+        data = f.read()
+    h = hashlib.sha384(data).digest()
+    nbytes = (n.bit_length() + 7) // 8
+    z = bi(h[:nbytes])
+
+    try:
+        w = pow(s, -1, n)
+    except TypeError:
+        w = pow(s, n-2, n)
+
+    u1 = (z * w) % n
+    u2 = (r * w) % n
+
+    P1 = curve.mul(curve.g, u1)
+    P2 = curve.mul(Q, u2)
+    R = curve.add(P1, P2)
+
+    if R is None or R[0] is None:
+        print("Verification failure")
+        return
+
+    if (R[0] % n) == r:
         print("Verified OK")
     else:
         print("Verification failure")
+
 
 def usage():
     print("Usage:")
