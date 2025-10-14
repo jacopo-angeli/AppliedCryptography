@@ -210,3 +210,5 @@ __marimo__/
 */testing/*
 !*/testing/*.sh
 !*/testing/big.enc
+!*/testing/CA_cert.pem
+!*/testing/CA_priv.pem
