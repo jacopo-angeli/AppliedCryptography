@@ -69,6 +69,7 @@ def bi(b):
 
 def send_alert(level, description):
     # level: 1=warning, 2=fatal; description examples: 20=bad_record_mac
+    print("--> Alert()")
     alert_body = bytes([level, description])
     record  = b"\x15"        # Alert record type
     record += b"\x03\x03"    # TLS 1.2
@@ -311,6 +312,7 @@ def parsehandshake(r):
         print("    [+] Cipher suite:", ciphers_map.get(cipher, "UNKNOWN " + cipher.hex()))
         if compression != b"\x00":
             print("[-] Wrong compression:", compression.hex())
+            send_alert(2, 47)
             print("[-] Closing TCP connection!")
             s.close()
             sys.exit(1)
@@ -354,8 +356,8 @@ def parsehandshake(r):
         verify_data_calc = PRF(master_secret, b"server finished" + sha256(handshake_messages[:-4-hlength]).digest(), 12)
         if server_verify != verify_data_calc:
             print("[-] Server finished verification failed!")
-            print("[-] Closing TCP connection!")
             send_alert(2, 51)
+            print("[-] Closing TCP connection!")
             s.close()
             sys.exit(1)
         server_finished_received = True
@@ -380,16 +382,19 @@ def parse_server_handshake(body):
 
 # parses TLS record
 def parserecord(r):
-    global server_change_cipher_spec_received
+    global server_change_cipher_spec_received, printed_server_handshake_header
 
     ctype = r[0:1]
     c = r[5:]
 
     if ctype == b"\x16":
         parse_server_handshake(c)
+    
     elif ctype == b"\x14":
         print("<--- ChangeCipherSpec()")
         server_change_cipher_spec_received = True
+        printed_server_handshake_header = False
+    
     elif ctype == b"\x15":
         print("<--- Alert()")
         level, desc = c[0], c[1]
@@ -400,10 +405,12 @@ def parserecord(r):
             sys.exit(1)
         else:
             sys.exit(1)
+    
     elif ctype == b"\x17":
         print("<--- Application_data()")
         data = decrypt(c, b"\x17", b"\x03\x03")
         print(data.decode().strip())
+    
     else:
         print("[-] Unknown TLS Record type:", ctype.hex())
         sys.exit(1)
@@ -465,9 +472,8 @@ def decrypt(ciphertext, type, version):
     mac_calc = HMAC_sha1(server_mac_key, ib(server_seq, 8) + type + version + ib(len(plain), 2) + plain)
     if mac!=mac_calc:
         print("[-] MAC verification failed!")
-        print("[-] Closing TCP connection!")
-        # Send fatal bad_record_mac and close
         send_alert(2, 20)
+        print("[-] Closing TCP connection!")
         s.close()
         sys.exit(1)
     server_seq+= 1
